@@ -1,5 +1,6 @@
 mod config;
 mod detection;
+mod launch;
 
 use std::path::PathBuf;
 
@@ -20,6 +21,18 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
+    },
+
+    #[command(after_help = "Examples:
+  Launch with configured mod:  hwde-manager launch hw1
+  Launch vanilla (no mod):     hwde-manager launch hw1 --vanilla")]
+    /// Launch a game with the configured mod
+    Launch {
+        /// Game to launch (hw1 or hw2)
+        game: Game,
+        /// Launch without any mod (clears ModManifest)
+        #[arg(long)]
+        vanilla: bool,
     },
 }
 
@@ -71,6 +84,45 @@ fn main() {
 
     match &cli.command {
         Commands::Config { command } => handle_config_command(&mut config, command),
+        Commands::Launch { game, vanilla } => handle_launch_command(&config, *game, *vanilla),
+    }
+}
+
+fn handle_launch_command(config: &config::Config, game: Game, vanilla: bool) {
+    let game_config = config.game_config(game);
+
+    // Get game path
+    let game_path = match &game_config.path {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "No game path configured for {:?}. Use 'config path {:?} --detect' first.",
+                game, game
+            );
+            std::process::exit(1);
+        }
+    };
+
+    // Get mod path (unless vanilla)
+    let mod_path = if vanilla {
+        None
+    } else {
+        game_config.mod_path.as_ref()
+    };
+
+    // Launch the game
+    match launch::launch_game(game, game_path, mod_path) {
+        Ok(()) => {
+            if let Some(mp) = mod_path {
+                println!("Launched {:?} with mod: {}", game, mp.display());
+            } else {
+                println!("Launched {:?} (vanilla)", game);
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to launch game: {}", e);
+            std::process::exit(1);
+        }
     }
 }
 
