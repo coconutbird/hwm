@@ -8,8 +8,8 @@ use clap::{Parser, Subcommand};
 use config::Game;
 
 #[derive(Parser)]
-#[command(name = "hwde-manager")]
-#[command(about = "Halo Wars Definitive Edition mod manager")]
+#[command(name = "hwm")]
+#[command(about = "Halo Wars mod manager")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -24,8 +24,8 @@ enum Commands {
     },
 
     #[command(after_help = "Examples:
-  Launch with configured mod:  hwde-manager launch hw1
-  Launch vanilla (no mod):     hwde-manager launch hw1 --vanilla")]
+  Launch with configured mod:  hwm launch hw1
+  Launch vanilla (no mod):     hwm launch hw1 --vanilla")]
     /// Launch a game with the configured mod
     Launch {
         /// Game to launch (hw1 or hw2)
@@ -42,10 +42,10 @@ enum ConfigCommands {
     Show,
 
     #[command(after_help = "Examples:
-  Get current path:      hwde-manager config path hw1
-  Auto-detect and save:  hwde-manager config path hw1 --detect
-  Set path manually:     hwde-manager config path hw1 \"C:\\Games\\HW1\"
-  Clear path:            hwde-manager config path hw1 --clear")]
+  Get current path:      hwm config path hw1
+  Auto-detect and save:  hwm config path hw1 --detect
+  Set path manually:     hwm config path hw1 \"C:\\Games\\HW1\"
+  Clear path:            hwm config path hw1 --clear")]
     /// Get or set game installation path
     Path {
         /// Game (hw1 or hw2)
@@ -61,9 +61,9 @@ enum ConfigCommands {
     },
 
     #[command(after_help = "Examples:
-  Get current mod path:  hwde-manager config mod-path hw1
-  Set mod path:          hwde-manager config mod-path hw1 \"C:\\Mods\\MyMod\"
-  Clear mod path:        hwde-manager config mod-path hw1 --clear")]
+  Get current mod path:  hwm config mod-path hw1
+  Set mod path:          hwm config mod-path hw1 \"C:\\Mods\\MyMod\"
+  Clear mod path:        hwm config mod-path hw1 --clear")]
     /// Get or set active mod path
     ModPath {
         /// Game (hw1 or hw2)
