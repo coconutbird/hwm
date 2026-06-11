@@ -1,6 +1,7 @@
 mod config;
 mod detection;
 mod launch;
+mod mods;
 
 use std::path::PathBuf;
 
@@ -23,6 +24,12 @@ enum Commands {
         command: ConfigCommands,
     },
 
+    /// Mod commands
+    Mod {
+        #[command(subcommand)]
+        command: ModCommands,
+    },
+
     #[command(after_help = "Examples:
   Launch with configured mod:  hwm launch hw1
   Launch vanilla (no mod):     hwm launch hw1 --vanilla")]
@@ -33,6 +40,18 @@ enum Commands {
         /// Launch without any mod (clears ModManifest)
         #[arg(long)]
         vanilla: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModCommands {
+    #[command(after_help = "Examples:
+  View mod from directory:  hwm mod info ./MyMod
+  View mod from zip:        hwm mod info ./MyMod.hwmod")]
+    /// Display information about a mod
+    Info {
+        /// Path to mod directory or archive
+        path: PathBuf,
     },
 }
 
@@ -84,7 +103,46 @@ fn main() {
 
     match &cli.command {
         Commands::Config { command } => handle_config_command(&mut config, command),
+        Commands::Mod { command } => handle_mod_command(command),
         Commands::Launch { game, vanilla } => handle_launch_command(&config, *game, *vanilla),
+    }
+}
+
+fn handle_mod_command(command: &ModCommands) {
+    match command {
+        ModCommands::Info { path } => match mods::load_mod(path) {
+            Ok(hwmod) => {
+                println!("Mod: {}", hwmod.title());
+                println!("Author: {}", hwmod.author());
+                println!("Version: {}", hwmod.version());
+
+                if let Some(id) = hwmod.mod_id() {
+                    println!("Mod ID: {}", id);
+                }
+
+                if let Some(desc) = hwmod.description() {
+                    println!();
+                    println!("Description:");
+                    println!("  {}", desc);
+                }
+
+                if let Some(banner) = hwmod.banner_path() {
+                    println!();
+                    println!("Banner: {}", banner);
+                }
+
+                if let Some(icon) = hwmod.icon_path() {
+                    println!("Icon: {}", icon);
+                }
+
+                println!();
+                println!("Source: {}", hwmod.source.path().display());
+            }
+            Err(e) => {
+                eprintln!("Failed to load mod: {}", e);
+                std::process::exit(1);
+            }
+        },
     }
 }
 
