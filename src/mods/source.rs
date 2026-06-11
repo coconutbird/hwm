@@ -49,8 +49,16 @@ impl ModSource {
         }
     }
 
-    /// Read a file from the mod source
+    /// Read a file from the mod source.
+    ///
+    /// `relative_path` must stay within the mod root: absolute paths and
+    /// parent-directory (`..`) components are rejected so a manifest can't
+    /// point the reader at arbitrary files on disk.
     pub fn read_file(&self, relative_path: &str) -> Result<Vec<u8>, ModError> {
+        if !is_safe_relative_path(relative_path) {
+            return Err(ModError::InvalidPath(relative_path.to_string()));
+        }
+
         match self {
             Self::Directory(base) => {
                 let full_path = base.join(relative_path);
@@ -60,31 +68,11 @@ impl ModSource {
                 let file = File::open(zip_path).map_err(|e| ModError::Io(e, zip_path.clone()))?;
                 let mut archive = ZipArchive::new(BufReader::new(file))?;
 
-                // Try exact path first, then try with forward slashes
                 let normalized = relative_path.replace('\\', "/");
+                let index = zip_entry_index(&mut archive, &normalized)
+                    .ok_or(ModError::Zip(zip::result::ZipError::FileNotFound))?;
 
-                // Find the file index (case-insensitive fallback)
-                let file_index = if archive.by_name(&normalized).is_ok() {
-                    None // Use by_name directly
-                } else {
-                    // Case-insensitive search
-                    let mut found = None;
-                    for i in 0..archive.len() {
-                        if let Ok(f) = archive.by_index(i) {
-                            if f.name().eq_ignore_ascii_case(&normalized) {
-                                found = Some(i);
-                                break;
-                            }
-                        }
-                    }
-                    found
-                };
-
-                let mut zip_file = match file_index {
-                    Some(idx) => archive.by_index(idx)?,
-                    None => archive.by_name(&normalized)?,
-                };
-
+                let mut zip_file = archive.by_index(index)?;
                 let mut contents = Vec::new();
                 zip_file
                     .read_to_end(&mut contents)
@@ -94,26 +82,70 @@ impl ModSource {
         }
     }
 
-    /// Check if a file exists in the mod source
-    pub fn file_exists(&self, relative_path: &str) -> bool {
-        match self {
-            Self::Directory(base) => base.join(relative_path).exists(),
-            Self::Zip(zip_path) => {
-                if let Ok(file) = File::open(zip_path) {
-                    if let Ok(mut archive) = ZipArchive::new(BufReader::new(file)) {
-                        let normalized = relative_path.replace('\\', "/");
-                        return archive.by_name(&normalized).is_ok();
-                    }
-                }
-                false
-            }
-        }
-    }
-
     /// Get the path to this mod source
     pub fn path(&self) -> &Path {
         match self {
             Self::Directory(p) | Self::Zip(p) => p,
         }
+    }
+}
+
+/// Reject absolute paths and any `..` component so a mod-supplied relative
+/// path can't escape the mod root (zip-slip / path traversal).
+fn is_safe_relative_path(relative_path: &str) -> bool {
+    let normalized = relative_path.replace('\\', "/");
+    if normalized.is_empty() || normalized.starts_with('/') || Path::new(&normalized).is_absolute()
+    {
+        return false;
+    }
+    !normalized.split('/').any(|component| component == "..")
+}
+
+/// Find a zip entry by name in a single pass: an exact match wins immediately,
+/// otherwise the first case-insensitive match is used.
+fn zip_entry_index(archive: &mut ZipArchive<BufReader<File>>, name: &str) -> Option<usize> {
+    let mut fallback = None;
+    for i in 0..archive.len() {
+        let Ok(entry) = archive.by_index(i) else {
+            continue;
+        };
+        let entry_name = entry.name();
+        if entry_name == name {
+            return Some(i);
+        }
+        if fallback.is_none() && entry_name.eq_ignore_ascii_case(name) {
+            fallback = Some(i);
+        }
+    }
+    fallback
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_normal_relative_paths() {
+        assert!(is_safe_relative_path("manifest.xml"));
+        assert!(is_safe_relative_path("art/banner.png"));
+        assert!(is_safe_relative_path("art\\icon.png"));
+    }
+
+    #[test]
+    fn rejects_escaping_paths() {
+        assert!(!is_safe_relative_path(""));
+        assert!(!is_safe_relative_path("../secret"));
+        assert!(!is_safe_relative_path("art/../../secret"));
+        assert!(!is_safe_relative_path("..\\secret"));
+        assert!(!is_safe_relative_path("/etc/passwd"));
+    }
+
+    #[test]
+    fn read_file_rejects_traversal() {
+        // A directory source must refuse to read outside its root, before
+        // ever touching the filesystem.
+        let source = ModSource::Directory(std::env::temp_dir());
+        let result = source.read_file("../anything");
+        assert!(matches!(result, Err(ModError::InvalidPath(_))));
     }
 }

@@ -17,6 +17,8 @@ pub enum ModError {
     ManifestNotFound,
     /// Unsupported mod format
     UnsupportedFormat(String),
+    /// A mod-relative path was absolute or escaped the mod root
+    InvalidPath(String),
 }
 
 impl std::fmt::Display for ModError {
@@ -28,6 +30,7 @@ impl std::fmt::Display for ModError {
             Self::Zip(e) => write!(f, "Zip error: {}", e),
             Self::ManifestNotFound => write!(f, "Manifest file not found in mod"),
             Self::UnsupportedFormat(fmt) => write!(f, "Unsupported mod format: {}", fmt),
+            Self::InvalidPath(p) => write!(f, "Invalid mod-relative path: {}", p),
         }
     }
 }

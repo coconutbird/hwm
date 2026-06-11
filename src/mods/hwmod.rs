@@ -152,14 +152,12 @@ pub fn load(path: &Path) -> Result<HwMod, ModError> {
         .read_file(MANIFEST_FILE)
         .map_err(|_| ModError::ManifestNotFound)?;
 
-    // Parse the XML manifest
-    let manifest: ModManifest = quick_xml::de::from_reader(manifest_bytes.as_slice())
-        .map_err(|e| ModError::ManifestParse(e.to_string()))?;
+    let manifest = parse_manifest(&manifest_bytes)?;
 
     Ok(HwMod { manifest, source })
 }
 
-/// Parse a manifest from XML bytes (useful for testing)
+/// Parse a manifest from XML bytes
 pub fn parse_manifest(xml: &[u8]) -> Result<ModManifest, ModError> {
     quick_xml::de::from_reader(xml).map_err(|e| ModError::ManifestParse(e.to_string()))
 }
@@ -169,6 +167,35 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// A temp directory removed on drop, so a panicking test never leaks state.
+    /// Names are unique per process + call to avoid collisions between tests
+    /// (including concurrent test binaries).
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            static COUNTER: AtomicU32 = AtomicU32::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("hwmod_test_{}_{}_{}", label, std::process::id(), n));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            TempDir(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     const MANIFEST_WITH_EMPTY_ART: &str = r#"<HWMod ManifestVersion="1" ModID="47473A9018E7DC39A95AEF8CC95CC891F6D9F5A61FFE2D6DAA36157E8B25105F">
   <RequiredData Title="Example Reskin Mod" Author="Modder" Version="1.0" />
@@ -274,13 +301,10 @@ mod tests {
 
     #[test]
     fn load_from_directory() {
-        let temp_dir = std::env::temp_dir().join("hwmod_test_dir");
-        let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).unwrap();
+        let dir = TempDir::new("dir");
+        fs::write(dir.path().join("manifest.xml"), FULL_MANIFEST).unwrap();
 
-        fs::write(temp_dir.join("manifest.xml"), FULL_MANIFEST).unwrap();
-
-        let hwmod = load(&temp_dir).unwrap();
+        let hwmod = load(dir.path()).unwrap();
         assert_eq!(hwmod.title(), "Full Test Mod");
         assert_eq!(hwmod.author(), "Test Author");
         assert_eq!(hwmod.version(), "2.0.0");
@@ -288,42 +312,34 @@ mod tests {
         assert_eq!(hwmod.description(), Some("A fully featured test mod."));
         assert_eq!(hwmod.banner_path(), Some("art/banner.png"));
         assert_eq!(hwmod.icon_path(), Some("art/icon.png"));
-
-        fs::remove_dir_all(&temp_dir).unwrap();
     }
 
     #[test]
     fn load_from_zip() {
-        let temp_file = std::env::temp_dir().join("hwmod_test.zip");
-        let _ = fs::remove_file(&temp_file);
+        let dir = TempDir::new("zip");
+        let zip_path = dir.path().join("mod.zip");
 
         // Create a zip file with the manifest
-        let file = fs::File::create(&temp_file).unwrap();
+        let file = fs::File::create(&zip_path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
         zip.start_file::<_, ()>("manifest.xml", Default::default())
             .unwrap();
         zip.write_all(MANIFEST_WITH_EMPTY_ART.as_bytes()).unwrap();
         zip.finish().unwrap();
 
-        let hwmod = load(&temp_file).unwrap();
+        let hwmod = load(&zip_path).unwrap();
         assert_eq!(hwmod.title(), "Example Reskin Mod");
         assert_eq!(hwmod.author(), "Modder");
         assert_eq!(hwmod.version(), "1.0");
         assert!(hwmod.description().unwrap().contains("reskin"));
-
-        fs::remove_file(&temp_file).unwrap();
     }
 
     #[test]
     fn load_missing_manifest() {
-        let temp_dir = std::env::temp_dir().join("hwmod_test_empty");
-        let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).unwrap();
+        let dir = TempDir::new("empty");
 
-        let result = load(&temp_dir);
+        let result = load(dir.path());
         assert!(matches!(result, Err(ModError::ManifestNotFound)));
-
-        fs::remove_dir_all(&temp_dir).unwrap();
     }
 
     #[test]
@@ -334,13 +350,10 @@ mod tests {
 
     #[test]
     fn hwmod_accessors_with_missing_optional() {
-        let temp_dir = std::env::temp_dir().join("hwmod_test_minimal");
-        let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).unwrap();
+        let dir = TempDir::new("minimal");
+        fs::write(dir.path().join("manifest.xml"), MINIMAL_MANIFEST).unwrap();
 
-        fs::write(temp_dir.join("manifest.xml"), MINIMAL_MANIFEST).unwrap();
-
-        let hwmod = load(&temp_dir).unwrap();
+        let hwmod = load(dir.path()).unwrap();
         assert_eq!(hwmod.title(), "Minimal Mod");
         assert_eq!(hwmod.author(), "Test");
         assert_eq!(hwmod.version(), "0.1");
@@ -348,7 +361,5 @@ mod tests {
         assert!(hwmod.description().is_none());
         assert!(hwmod.banner_path().is_none());
         assert!(hwmod.icon_path().is_none());
-
-        fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

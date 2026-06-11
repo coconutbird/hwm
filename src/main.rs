@@ -123,7 +123,9 @@ fn handle_mod_command(command: &ModCommands) {
                 if let Some(desc) = hwmod.description() {
                     println!();
                     println!("Description:");
-                    println!("  {}", desc);
+                    for line in desc.lines() {
+                        println!("  {}", line);
+                    }
                 }
 
                 if let Some(banner) = hwmod.banner_path() {

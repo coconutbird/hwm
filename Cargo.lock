@@ -78,9 +78,11 @@ checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 [[package]]
 name = "bdt"
 version = "0.1.0"
+source = "git+https://github.com/coconutbird/ensemble-formats.git?branch=dev%2Fprim#351197b4283208c743340bee3340d72c321b7dcc"
 dependencies = [
- "byteorder",
+ "hashbrown 0.16.1",
  "thiserror",
+ "zerocopy",
 ]
 
 [[package]]
@@ -103,12 +105,6 @@ name = "bumpalo"
 version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
-
-[[package]]
-name = "byteorder"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bzip2"
@@ -296,10 +292,12 @@ dependencies = [
 [[package]]
 name = "ecf"
 version = "0.1.0"
+source = "git+https://github.com/coconutbird/ensemble-formats.git?branch=dev%2Fprim#351197b4283208c743340bee3340d72c321b7dcc"
 dependencies = [
- "byteorder",
- "flate2",
+ "miniz_oxide",
+ "nostdio",
  "thiserror",
+ "zerocopy",
 ]
 
 [[package]]
@@ -317,15 +315,15 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 [[package]]
 name = "era"
 version = "0.1.0"
+source = "git+https://github.com/coconutbird/ensemble-formats.git?branch=dev%2Fprim#351197b4283208c743340bee3340d72c321b7dcc"
 dependencies = [
- "byteorder",
  "ecf",
- "flate2",
- "memmap2",
+ "miniz_oxide",
  "rayon",
  "sha1",
  "thiserror",
  "tiger",
+ "zerocopy",
 ]
 
 [[package]]
@@ -340,7 +338,6 @@ version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
- "crc32fast",
  "miniz_oxide",
  "zlib-rs",
 ]
@@ -350,6 +347,12 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "generic-array"
@@ -394,7 +397,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "era",
- "quick-xml 0.39.0",
+ "quick-xml",
  "serde",
  "toml",
  "winreg",
@@ -408,7 +411,7 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "foldhash",
+ "foldhash 0.1.5",
 ]
 
 [[package]]
@@ -416,6 +419,10 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+dependencies = [
+ "foldhash 0.2.0",
+ "rustc-std-workspace-alloc",
+]
 
 [[package]]
 name = "heck"
@@ -532,15 +539,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
-name = "memmap2"
-version = "0.9.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -549,6 +547,12 @@ dependencies = [
  "adler2",
  "simd-adler32",
 ]
+
+[[package]]
+name = "nostdio"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dd90a73af33ea00621a62c02e1c918457df504135180c959577099f043b9e2e"
 
 [[package]]
 name = "num-conv"
@@ -617,15 +621,6 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.37.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "quick-xml"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2e3bf4aa9d243beeb01a7b3bc30b77cfe2c44e24ec02d751a7104a53c2c49a1"
@@ -668,6 +663,12 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "rustc-std-workspace-alloc"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9d441c3b2ebf55cebf796bfdc265d67fa09db17b7bb6bd4be75c509e1e8fec3"
 
 [[package]]
 name = "rustversion"
@@ -1211,12 +1212,47 @@ dependencies = [
 [[package]]
 name = "xmb"
 version = "0.1.0"
+source = "git+https://github.com/coconutbird/ensemble-formats.git?branch=dev%2Fprim#351197b4283208c743340bee3340d72c321b7dcc"
 dependencies = [
  "bdt",
- "byteorder",
  "ecf",
- "quick-xml 0.37.5",
  "thiserror",
+ "xml",
+ "zerocopy",
+]
+
+[[package]]
+name = "xml"
+version = "0.1.0"
+source = "git+https://github.com/coconutbird/ensemble-formats.git?branch=dev%2Fprim#351197b4283208c743340bee3340d72c321b7dcc"
+dependencies = [
+ "xmlparser",
+]
+
+[[package]]
+name = "xmlparser"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
+
+[[package]]
+name = "zerocopy"
+version = "0.8.52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce1022995ff5ff5d841ad7d994facc23098cd40152f2c1d11cd607c6f530653f"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ae7f38b72ec2a254e2b87ef277cf2cd4fb97cbebf944faa6f33354da0867930"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

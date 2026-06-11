@@ -8,9 +8,9 @@ name = "hwm"
 path = "src/main.rs"
 
 [dependencies]
-# ensemble-rs crates
-era = { path = "../ensemble-rs/crates/era" }
-xmb = { path = "../ensemble-rs/crates/xmb" }
+# ensemble-formats crates (git deps; matches how ensemble-assets consumes them)
+era = { git = "https://github.com/coconutbird/ensemble-formats.git", branch = "dev/prim" }
+xmb = { git = "https://github.com/coconutbird/ensemble-formats.git", branch = "dev/prim" }
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }
