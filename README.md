@@ -78,17 +78,35 @@ game executable.
 ### Inspect a mod
 
 ```sh
-# From an unpacked directory
+# A mod folder (contains a .hwmod manifest + ModData/)
 hwm mod info ./MyMod
 
-# From a packaged archive
-hwm mod info ./MyMod.hwmod
+# Or the .hwmod manifest file directly
+hwm mod info "./My Mod v1.0.hwmod"
 ```
+
+`mod info` reports the title/author/version, whether the declared `ModID`
+matches its computed hash, whether the banner/icon art and `ModData/` folder are
+present, and the resolved manifest path.
 
 ## Mod format
 
-`hwm` reads the **hwmod** format (the Firebase / HaloWarsModding format): a
-directory or a zip/`.hwmod` archive containing a `manifest.xml`:
+`hwm` reads the **hwmod** format (Firebase / HaloWarsModding). A mod is a
+**folder** containing:
+
+- a `*.hwmod` **manifest** — an XML file (the `.hwmod` extension *is* the
+  manifest; it is not an archive), and
+- a `ModData/` folder with the actual game content.
+
+```
+MyMod/
+├── My Mod v1.0.hwmod   # XML manifest
+└── ModData/            # game content
+```
+
+Art paths are relative to the manifest's folder, and `ModID` is the uppercase
+SHA-256 of `<title-author-version>` — so `hwm` can flag a manifest whose ID
+doesn't match its metadata. Example manifest:
 
 ```xml
 <HWMod ManifestVersion="1" ModID="...">

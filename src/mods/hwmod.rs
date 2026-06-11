@@ -1,24 +1,30 @@
 //! HWMod format loader
 //!
-//! The hwmod format is the Firebase/HaloWarsModding mod format.
-//! It consists of a manifest.xml file with mod metadata and content files.
+//! The hwmod format is the Firebase / HaloWarsModding mod format. A mod is a
+//! directory containing a `.hwmod` XML manifest file alongside a sibling
+//! `ModData` folder with the actual game content. Art paths in the manifest are
+//! relative to the manifest's directory, and the manifest's `ModID` is an
+//! uppercase SHA-256 of `<title-author-version>`.
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::mods::error::ModError;
-use crate::mods::source::ModSource;
 
-/// The manifest file name
-const MANIFEST_FILE: &str = "manifest.xml";
+/// Conventional name of the content folder beside a mod manifest
+const MOD_DATA_DIR: &str = "ModData";
 
 /// A loaded hwmod
 pub struct HwMod {
     /// The mod manifest containing metadata
     pub manifest: ModManifest,
-    /// The source of the mod files
-    pub source: ModSource,
+    /// Path to the `.hwmod` manifest file
+    manifest_path: PathBuf,
+    /// The mod root (the directory the manifest lives in)
+    root: PathBuf,
 }
 
 impl HwMod {
@@ -45,7 +51,7 @@ impl HwMod {
             .unwrap_or("Unknown")
     }
 
-    /// Get the mod ID
+    /// Get the mod ID as declared in the manifest
     pub fn mod_id(&self) -> Option<&str> {
         self.manifest.mod_id.as_deref()
     }
@@ -59,7 +65,7 @@ impl HwMod {
             .and_then(|d| d.text.as_deref())
     }
 
-    /// Get the banner art relative path
+    /// Get the banner art path, relative to the mod root
     pub fn banner_path(&self) -> Option<&str> {
         self.manifest
             .optional
@@ -68,13 +74,68 @@ impl HwMod {
             .and_then(|b| b.relative_path.as_deref())
     }
 
-    /// Get the icon relative path
+    /// Get the icon path, relative to the mod root
     pub fn icon_path(&self) -> Option<&str> {
         self.manifest
             .optional
             .as_ref()
             .and_then(|o| o.icon.as_ref())
             .and_then(|i| i.relative_path.as_deref())
+    }
+
+    /// Path to the `.hwmod` manifest file
+    pub fn manifest_path(&self) -> &Path {
+        &self.manifest_path
+    }
+
+    /// The mod root directory (where the manifest lives)
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The `ModData` content folder for this mod
+    pub fn mod_data_dir(&self) -> PathBuf {
+        self.root.join(MOD_DATA_DIR)
+    }
+
+    /// Whether the `ModData` content folder exists on disk
+    pub fn has_mod_data(&self) -> bool {
+        self.mod_data_dir().is_dir()
+    }
+
+    /// Resolve the banner art to an absolute path, if declared and present
+    pub fn banner_file(&self) -> Option<PathBuf> {
+        self.resolve(self.banner_path())
+    }
+
+    /// Resolve the icon to an absolute path, if declared and present
+    pub fn icon_file(&self) -> Option<PathBuf> {
+        self.resolve(self.icon_path())
+    }
+
+    /// The ModID computed from title/author/version, using Firebase's scheme:
+    /// the uppercase SHA-256 hex of `<title-author-version>`.
+    pub fn computed_mod_id(&self) -> String {
+        compute_mod_id(&self.manifest.required)
+    }
+
+    /// Whether the declared ModID matches the computed one (Firebase validity).
+    pub fn is_valid(&self) -> bool {
+        self.manifest
+            .mod_id
+            .as_deref()
+            .is_some_and(|id| id.eq_ignore_ascii_case(&self.computed_mod_id()))
+    }
+
+    /// Resolve a manifest-relative path against the mod root, rejecting paths
+    /// that escape the root and returning `None` if the file is absent.
+    fn resolve(&self, relative: Option<&str>) -> Option<PathBuf> {
+        let relative = relative?;
+        if !is_safe_relative_path(relative) {
+            return None;
+        }
+        let full = self.root.join(relative.replace('\\', "/"));
+        full.exists().then_some(full)
     }
 }
 
@@ -143,18 +204,32 @@ pub struct Description {
     pub text: Option<String>,
 }
 
-/// Load an hwmod from a path
+/// Load an hwmod from a path: either a `.hwmod` manifest file, or a directory
+/// containing one (searched recursively, files before subdirectories).
 pub fn load(path: &Path) -> Result<HwMod, ModError> {
-    let source = ModSource::from_path(path)?;
+    if !path.exists() {
+        return Err(ModError::NotFound(path.to_path_buf()));
+    }
 
-    // Read the manifest file
-    let manifest_bytes = source
-        .read_file(MANIFEST_FILE)
-        .map_err(|_| ModError::ManifestNotFound)?;
+    let manifest_path = if path.is_dir() {
+        find_manifest(path)?.ok_or_else(|| ModError::ManifestNotFound(path.to_path_buf()))?
+    } else {
+        path.to_path_buf()
+    };
 
-    let manifest = parse_manifest(&manifest_bytes)?;
+    let bytes = fs::read(&manifest_path).map_err(|e| ModError::Io(e, manifest_path.clone()))?;
+    let manifest = parse_manifest(&bytes)?;
 
-    Ok(HwMod { manifest, source })
+    let root = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    Ok(HwMod {
+        manifest,
+        manifest_path,
+        root,
+    })
 }
 
 /// Parse a manifest from XML bytes
@@ -162,11 +237,68 @@ pub fn parse_manifest(xml: &[u8]) -> Result<ModManifest, ModError> {
     quick_xml::de::from_reader(xml).map_err(|e| ModError::ManifestParse(e.to_string()))
 }
 
+/// Find the first `.hwmod` file under `dir`, preferring files directly in the
+/// directory over ones nested in subdirectories. Entries are visited in sorted
+/// order so the result is deterministic.
+fn find_manifest(dir: &Path) -> Result<Option<PathBuf>, ModError> {
+    let mut entries: Vec<PathBuf> = fs::read_dir(dir)
+        .map_err(|e| ModError::Io(e, dir.to_path_buf()))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .collect();
+    entries.sort();
+
+    for entry in &entries {
+        if entry.is_file() && has_hwmod_extension(entry) {
+            return Ok(Some(entry.clone()));
+        }
+    }
+    for entry in &entries {
+        if entry.is_dir()
+            && let Some(found) = find_manifest(entry)?
+        {
+            return Ok(Some(found));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether a path has a `.hwmod` extension (case-insensitive).
+fn has_hwmod_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("hwmod"))
+}
+
+/// Compute Firebase's ModID: the uppercase SHA-256 hex of
+/// `<title-author-version>`, using empty strings for any missing field.
+fn compute_mod_id(required: &RequiredData) -> String {
+    let data = format!(
+        "<{}-{}-{}>",
+        required.title.as_deref().unwrap_or(""),
+        required.author.as_deref().unwrap_or(""),
+        required.version.as_deref().unwrap_or(""),
+    );
+    Sha256::digest(data.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect()
+}
+
+/// Reject absolute paths and any `..` component so a mod-supplied relative path
+/// can't escape the mod root (path traversal).
+fn is_safe_relative_path(relative_path: &str) -> bool {
+    let normalized = relative_path.replace('\\', "/");
+    if normalized.is_empty() || normalized.starts_with('/') || Path::new(&normalized).is_absolute()
+    {
+        return false;
+    }
+    !normalized.split('/').any(|component| component == "..")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::io::Write;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -179,8 +311,12 @@ mod tests {
         fn new(label: &str) -> Self {
             static COUNTER: AtomicU32 = AtomicU32::new(0);
             let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir()
-                .join(format!("hwmod_test_{}_{}_{}", label, std::process::id(), n));
+            let path = std::env::temp_dir().join(format!(
+                "hwmod_test_{}_{}_{}",
+                label,
+                std::process::id(),
+                n
+            ));
             let _ = fs::remove_dir_all(&path);
             fs::create_dir_all(&path).unwrap();
             TempDir(path)
@@ -294,52 +430,70 @@ mod tests {
 
     #[test]
     fn parse_missing_required_data() {
-        let xml = r#"<HWMod></HWMod>"#;
-        let result = parse_manifest(xml.as_bytes());
+        let result = parse_manifest(b"<HWMod></HWMod>");
         assert!(result.is_err());
     }
 
     #[test]
-    fn load_from_directory() {
-        let dir = TempDir::new("dir");
-        fs::write(dir.path().join("manifest.xml"), FULL_MANIFEST).unwrap();
-
-        let hwmod = load(dir.path()).unwrap();
-        assert_eq!(hwmod.title(), "Full Test Mod");
-        assert_eq!(hwmod.author(), "Test Author");
-        assert_eq!(hwmod.version(), "2.0.0");
-        assert_eq!(hwmod.mod_id(), Some("test.mod.full"));
-        assert_eq!(hwmod.description(), Some("A fully featured test mod."));
-        assert_eq!(hwmod.banner_path(), Some("art/banner.png"));
-        assert_eq!(hwmod.icon_path(), Some("art/icon.png"));
+    fn computes_firebase_mod_id() {
+        // Expected value computed independently with sha256sum over the exact
+        // string Firebase hashes: "<Example Reskin Mod-Modder-1.0>".
+        let required = RequiredData {
+            title: Some("Example Reskin Mod".to_string()),
+            author: Some("Modder".to_string()),
+            version: Some("1.0".to_string()),
+        };
+        assert_eq!(
+            compute_mod_id(&required),
+            "3C919E70C74967AE19DC62B23F1375DF12E724F3045EE47DF6C078F46D1DEAC8"
+        );
     }
 
     #[test]
-    fn load_from_zip() {
-        let dir = TempDir::new("zip");
-        let zip_path = dir.path().join("mod.zip");
+    fn load_hwmod_file_directly() {
+        let dir = TempDir::new("file");
+        let manifest = dir.path().join("Full Test Mod v2.0.0.hwmod");
+        fs::write(&manifest, FULL_MANIFEST).unwrap();
+        fs::create_dir_all(dir.path().join(MOD_DATA_DIR)).unwrap();
 
-        // Create a zip file with the manifest
-        let file = fs::File::create(&zip_path).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        zip.start_file::<_, ()>("manifest.xml", Default::default())
-            .unwrap();
-        zip.write_all(MANIFEST_WITH_EMPTY_ART.as_bytes()).unwrap();
-        zip.finish().unwrap();
+        let hwmod = load(&manifest).unwrap();
+        assert_eq!(hwmod.title(), "Full Test Mod");
+        assert_eq!(hwmod.author(), "Test Author");
+        assert_eq!(hwmod.version(), "2.0.0");
+        assert_eq!(hwmod.manifest_path(), manifest);
+        assert_eq!(hwmod.root(), dir.path());
+        assert_eq!(hwmod.mod_data_dir(), dir.path().join(MOD_DATA_DIR));
+        assert!(hwmod.has_mod_data());
+    }
 
-        let hwmod = load(&zip_path).unwrap();
-        assert_eq!(hwmod.title(), "Example Reskin Mod");
-        assert_eq!(hwmod.author(), "Modder");
-        assert_eq!(hwmod.version(), "1.0");
-        assert!(hwmod.description().unwrap().contains("reskin"));
+    #[test]
+    fn load_finds_manifest_in_directory() {
+        let dir = TempDir::new("dir");
+        fs::write(dir.path().join("MyMod v1.hwmod"), FULL_MANIFEST).unwrap();
+
+        let hwmod = load(dir.path()).unwrap();
+        assert_eq!(hwmod.title(), "Full Test Mod");
+        // No ModData folder was created.
+        assert!(!hwmod.has_mod_data());
+    }
+
+    #[test]
+    fn load_finds_manifest_in_subdirectory() {
+        let dir = TempDir::new("nested");
+        let sub = dir.path().join("inner");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("Nested.hwmod"), MINIMAL_MANIFEST).unwrap();
+
+        let hwmod = load(dir.path()).unwrap();
+        assert_eq!(hwmod.title(), "Minimal Mod");
+        assert_eq!(hwmod.root(), sub);
     }
 
     #[test]
     fn load_missing_manifest() {
         let dir = TempDir::new("empty");
-
         let result = load(dir.path());
-        assert!(matches!(result, Err(ModError::ManifestNotFound)));
+        assert!(matches!(result, Err(ModError::ManifestNotFound(_))));
     }
 
     #[test]
@@ -349,17 +503,54 @@ mod tests {
     }
 
     #[test]
-    fn hwmod_accessors_with_missing_optional() {
-        let dir = TempDir::new("minimal");
-        fs::write(dir.path().join("manifest.xml"), MINIMAL_MANIFEST).unwrap();
+    fn resolves_art_and_validates_matching_id() {
+        let dir = TempDir::new("art");
+        // ModID is the genuine SHA-256 for this title/author/version.
+        let manifest = r#"<HWMod ModID="3C919E70C74967AE19DC62B23F1375DF12E724F3045EE47DF6C078F46D1DEAC8">
+  <RequiredData Title="Example Reskin Mod" Author="Modder" Version="1.0" />
+  <OptionalData>
+    <Icon>art/icon.png</Icon>
+  </OptionalData>
+</HWMod>"#;
+        fs::write(dir.path().join("mod.hwmod"), manifest).unwrap();
+        fs::create_dir_all(dir.path().join("art")).unwrap();
+        fs::write(dir.path().join("art").join("icon.png"), b"fake").unwrap();
 
         let hwmod = load(dir.path()).unwrap();
-        assert_eq!(hwmod.title(), "Minimal Mod");
-        assert_eq!(hwmod.author(), "Test");
-        assert_eq!(hwmod.version(), "0.1");
-        assert!(hwmod.mod_id().is_none());
-        assert!(hwmod.description().is_none());
-        assert!(hwmod.banner_path().is_none());
-        assert!(hwmod.icon_path().is_none());
+        assert!(hwmod.is_valid());
+        assert_eq!(
+            hwmod.icon_file(),
+            Some(dir.path().join("art").join("icon.png"))
+        );
+        // Banner not declared.
+        assert!(hwmod.banner_file().is_none());
+    }
+
+    #[test]
+    fn rejects_mismatched_id_and_unsafe_art() {
+        let dir = TempDir::new("bad");
+        let manifest = r#"<HWMod ModID="DEADBEEF">
+  <RequiredData Title="X" Author="Y" Version="1" />
+  <OptionalData>
+    <Icon>../escape.png</Icon>
+  </OptionalData>
+</HWMod>"#;
+        fs::write(dir.path().join("mod.hwmod"), manifest).unwrap();
+
+        let hwmod = load(dir.path()).unwrap();
+        assert!(!hwmod.is_valid());
+        // A traversal path must never resolve, even to an existing file.
+        assert!(hwmod.icon_file().is_none());
+    }
+
+    #[test]
+    fn safe_relative_paths() {
+        assert!(is_safe_relative_path("manifest.xml"));
+        assert!(is_safe_relative_path("art/banner.png"));
+        assert!(is_safe_relative_path("art\\icon.png"));
+        assert!(!is_safe_relative_path(""));
+        assert!(!is_safe_relative_path("../secret"));
+        assert!(!is_safe_relative_path("art/../../secret"));
+        assert!(!is_safe_relative_path("/etc/passwd"));
     }
 }

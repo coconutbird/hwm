@@ -20,4 +20,4 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 winreg = "0.55.0"
 quick-xml = { version = "0.39.0", features = ["serialize"] }
-zip = "8.0.0"
+sha2 = "0.10"

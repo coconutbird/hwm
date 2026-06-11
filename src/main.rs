@@ -46,11 +46,11 @@ enum Commands {
 #[derive(Subcommand)]
 enum ModCommands {
     #[command(after_help = "Examples:
-  View mod from directory:  hwm mod info ./MyMod
-  View mod from zip:        hwm mod info ./MyMod.hwmod")]
+  View an unpacked mod folder:  hwm mod info ./MyMod
+  View a .hwmod manifest file:  hwm mod info \"./MyMod v1.0.hwmod\"")]
     /// Display information about a mod
     Info {
-        /// Path to mod directory or archive
+        /// Path to a mod directory or a .hwmod manifest file
         path: PathBuf,
     },
 }
@@ -116,8 +116,16 @@ fn handle_mod_command(command: &ModCommands) {
                 println!("Author: {}", hwmod.author());
                 println!("Version: {}", hwmod.version());
 
-                if let Some(id) = hwmod.mod_id() {
-                    println!("Mod ID: {}", id);
+                match hwmod.mod_id() {
+                    Some(id) => {
+                        let status = if hwmod.is_valid() {
+                            "valid"
+                        } else {
+                            "mismatch"
+                        };
+                        println!("Mod ID: {} ({})", id, status);
+                    }
+                    None => println!("Mod ID: none (computed: {})", hwmod.computed_mod_id()),
                 }
 
                 if let Some(desc) = hwmod.description() {
@@ -130,15 +138,35 @@ fn handle_mod_command(command: &ModCommands) {
 
                 if let Some(banner) = hwmod.banner_path() {
                     println!();
-                    println!("Banner: {}", banner);
+                    let status = if hwmod.banner_file().is_some() {
+                        "found"
+                    } else {
+                        "missing"
+                    };
+                    println!("Banner: {} ({})", banner, status);
                 }
 
                 if let Some(icon) = hwmod.icon_path() {
-                    println!("Icon: {}", icon);
+                    let status = if hwmod.icon_file().is_some() {
+                        "found"
+                    } else {
+                        "missing"
+                    };
+                    println!("Icon: {} ({})", icon, status);
                 }
 
                 println!();
-                println!("Source: {}", hwmod.source.path().display());
+                println!("Location: {}", hwmod.root().display());
+                println!("Manifest: {}", hwmod.manifest_path().display());
+                println!(
+                    "Mod data: {} ({})",
+                    hwmod.mod_data_dir().display(),
+                    if hwmod.has_mod_data() {
+                        "present"
+                    } else {
+                        "missing"
+                    }
+                );
             }
             Err(e) => {
                 eprintln!("Failed to load mod: {}", e);
